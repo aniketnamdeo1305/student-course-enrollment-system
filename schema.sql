@@ -91,3 +91,26 @@ BEFORE INSERT OR UPDATE ON student_courses
 FOR EACH ROW
 EXECUTE FUNCTION prevent_timetable_clash();
 
+CREATE OR REPLACE FUNCTION prevent_timetable_update_conflict()
+RETURNS TRIGGER AS $$
+DECLARE
+  conflict_found BOOLEAN := FALSE;
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM student_courses sc
+    JOIN course_timetables ct ON sc.course_id = ct.course_id
+    WHERE sc.student_id IN (
+      SELECT student_id FROM student_courses WHERE course_id = NEW.course_id
+    )
+    AND ct.course_id != NEW.course_id
+    AND ct.day_of_week = NEW.day_of_week
+    AND NEW.start_time < ct.end_time
+    AND ct.start_time < NEW.end_time
+  ) THEN
+    RAISE EXCEPTION 'Timetable update failed: would cause conflict for enrolled students';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
